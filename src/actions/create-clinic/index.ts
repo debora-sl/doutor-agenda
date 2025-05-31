@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 
 import { db } from "@/db";
 import { clinicsTable, usersToClinicsTable } from "@/db/schema";
-import { auth } from "@/lib/auth/auth";
+import { auth } from "@/lib/auth";
 
 export const createClinic = async (name: string) => {
   // verifica se o usuário está logado
