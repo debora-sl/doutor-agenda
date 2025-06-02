@@ -1,3 +1,4 @@
+import { relations } from "drizzle-orm";
 import {
   boolean,
   integer,
@@ -8,7 +9,6 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm/relations";
 
 export const usersTable = pgTable("users", {
   id: text("id").primaryKey(),
@@ -60,12 +60,8 @@ export const verificationsTable = pgTable("verifications", {
   identifier: text("identifier").notNull(),
   value: text("value").notNull(),
   expiresAt: timestamp("expires_at").notNull(),
-  createdAt: timestamp("created_at").$defaultFn(
-    () => /* @__PURE__ */ new Date(),
-  ),
-  updatedAt: timestamp("updated_at").$defaultFn(
-    () => /* @__PURE__ */ new Date(),
-  ),
+  createdAt: timestamp("created_at"),
+  updatedAt: timestamp("updated_at"),
 });
 
 export const clinicsTable = pgTable("clinics", {
@@ -113,14 +109,14 @@ export const clinicsTableRelations = relations(clinicsTable, ({ many }) => ({
 
 export const doctorsTable = pgTable("doctors", {
   id: uuid("id").defaultRandom().primaryKey(),
-  clinicId: uuid("clinic_id").references(() => clinicsTable.id, {
-    onDelete: "cascade",
-  }),
+  clinicId: uuid("clinic_id")
+    .notNull()
+    .references(() => clinicsTable.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   avatarImageUrl: text("avatar_image_url"),
   // 1 - Monday, 2 - Tuesday, 3 - Wednesday, 4 - Thursday, 5 - Friday, 6 - Saturday, 0 - Sunday
-  availableFromWeekday: integer("available_from_weekday").notNull(), // 1
-  availableToWeekday: integer("available_to_weekday").notNull(), // 5
+  availableFromWeekDay: integer("available_from_week_day").notNull(),
+  availableToWeekDay: integer("available_to_week_day").notNull(),
   availableFromTime: time("available_from_time").notNull(),
   availableToTime: time("available_to_time").notNull(),
   specialty: text("specialty").notNull(),
@@ -142,19 +138,18 @@ export const doctorsTableRelations = relations(
   }),
 );
 
-// enum
-export const patientsSexEnum = pgEnum("patients_sex", ["male", "female"]);
+export const patientSexEnum = pgEnum("patient_sex", ["male", "female"]);
 
 export const patientsTable = pgTable("patients", {
   id: uuid("id").defaultRandom().primaryKey(),
-  clinicId: uuid("clinic_id").references(() => clinicsTable.id, {
-    onDelete: "cascade",
-  }),
+  clinicId: uuid("clinic_id")
+    .notNull()
+    .references(() => clinicsTable.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
   email: text("email").notNull(),
   phoneNumber: text("phone_number").notNull(),
-  sex: patientsSexEnum("sex").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  sex: patientSexEnum("sex").notNull(),
   updatedAt: timestamp("updated_at")
     .defaultNow()
     .$onUpdate(() => new Date()),
@@ -174,15 +169,15 @@ export const patientsTableRelations = relations(
 export const appointmentsTable = pgTable("appointments", {
   id: uuid("id").defaultRandom().primaryKey(),
   date: timestamp("date").notNull(),
-  clinicId: uuid("clinic_id").references(() => clinicsTable.id, {
-    onDelete: "cascade",
-  }),
-  patientId: uuid("patient_id").references(() => patientsTable.id, {
-    onDelete: "cascade",
-  }),
-  doctorId: uuid("doctor_id").references(() => doctorsTable.id, {
-    onDelete: "cascade",
-  }),
+  clinicId: uuid("clinic_id")
+    .notNull()
+    .references(() => clinicsTable.id, { onDelete: "cascade" }),
+  patientId: uuid("patient_id")
+    .notNull()
+    .references(() => patientsTable.id, { onDelete: "cascade" }),
+  doctorId: uuid("doctor_id")
+    .notNull()
+    .references(() => doctorsTable.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at")
     .defaultNow()

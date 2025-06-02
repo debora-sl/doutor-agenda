@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/page-container";
 import { auth } from "@/lib/auth";
 
-import AddDoctorButton from "./components/add-doctor-button";
+import AddDoctorButton from "./_components/add-doctor-button";
 
 const DoctorsPage = async () => {
   const session = await auth.api.getSession({
@@ -21,8 +21,7 @@ const DoctorsPage = async () => {
   if (!session?.user) {
     redirect("/authentication");
   }
-  console.log(session.user.clinic);
-  if (!session.user.clinic) {
+  if (!("clinic" in session.user)) {
     redirect("/clinic-form");
   }
   return (
