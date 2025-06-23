@@ -36,7 +36,6 @@ export const createStripeCheckout = actionClient.action(async () => {
       },
     ],
   });
-  console.log(sessionId);
   return {
     sessionId,
   };
