@@ -6,91 +6,90 @@ import { db } from "@/db";
 import { usersTable } from "@/db/schema";
 
 export const POST = async (request: Request) => {
-  if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) {
-    throw new Error("Stripe secret key not found");
-  }
-
-  const signature = request.headers.get("stripe-signature");
-  if (!signature) {
-    throw new Error("Stripe signature not found");
-  }
-
-  const text = await request.text();
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-    apiVersion: "2025-05-28.basil",
-  });
-
-  const event = stripe.webhooks.constructEvent(
-    text,
-    signature,
-    process.env.STRIPE_WEBHOOK_SECRET,
-  );
-
-  switch (event.type) {
-    case "invoice.paid": {
-      const invoice = event.data.object as Stripe.Invoice & {
-        subscription?: string;
-      };
-
-      if (!invoice.subscription || !invoice.customer) {
-        throw new Error("Missing subscription or customer in invoice");
-      }
-
-      // Recupera os metadados da assinatura diretamente da API do Stripe
-      const subscription = await stripe.subscriptions.retrieve(
-        invoice.subscription,
-      );
-
-      const userId = subscription.metadata?.userId;
-
-      if (!userId) {
-        throw new Error("User ID not found in subscription metadata");
-      }
-
-      await db
-        .update(usersTable)
-        .set({
-          stripeSubscriptionId: invoice.subscription,
-          stripeCustomerId: invoice.customer.toString(),
-          plan: "essential",
-        })
-        .where(eq(usersTable.id, userId));
-
-      break;
+  try {
+    if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) {
+      throw new Error("Stripe keys not configured");
     }
 
-    case "customer.subscription.deleted": {
-      if (!event.data.object.id) {
-        throw new Error("Subscription ID not found");
-      }
-
-      const subscription = await stripe.subscriptions.retrieve(
-        event.data.object.id,
-      );
-
-      if (!subscription) {
-        throw new Error("Subscription not found");
-      }
-
-      const userId = subscription.metadata?.userId;
-      if (!userId) {
-        throw new Error("User ID not found");
-      }
-
-      await db
-        .update(usersTable)
-        .set({
-          stripeSubscriptionId: null,
-          stripeCustomerId: null,
-          plan: null,
-        })
-        .where(eq(usersTable.id, userId));
-
-      break;
+    const signature = request.headers.get("stripe-signature");
+    if (!signature) {
+      throw new Error("Missing Stripe signature");
     }
-  }
 
-  return NextResponse.json({
-    received: true,
-  });
+    const text = await request.text();
+    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+      apiVersion: "2025-05-28.basil",
+    });
+
+    const event = stripe.webhooks.constructEvent(
+      text,
+      signature,
+      process.env.STRIPE_WEBHOOK_SECRET,
+    );
+
+    switch (event.type) {
+      case "invoice.paid": {
+        const invoice = event.data.object as Stripe.Invoice;
+
+        const lineItem = invoice.lines.data?.[0];
+        const parent = lineItem?.parent as {
+          subscription_details?: {
+            subscription: string;
+            metadata?: {
+              userId?: string;
+            };
+          };
+        };
+
+        const subscriptionId = parent?.subscription_details?.subscription;
+        const userId = parent?.subscription_details?.metadata?.userId;
+        const customerId = invoice.customer?.toString();
+
+        if (!subscriptionId || !userId || !customerId) {
+          console.error("Missing subscription ID, user ID, or customer ID");
+          return new NextResponse("Missing data", { status: 400 });
+        }
+
+        await db
+          .update(usersTable)
+          .set({
+            stripeSubscriptionId: subscriptionId,
+            stripeCustomerId: customerId,
+            plan: "essential",
+          })
+          .where(eq(usersTable.id, userId));
+
+        break;
+      }
+
+      case "customer.subscription.deleted": {
+        const subscription = event.data.object as Stripe.Subscription;
+        const userId = subscription.metadata?.userId;
+
+        if (!userId) {
+          console.error("Missing user ID on subscription deletion");
+          return new NextResponse("Missing user ID", { status: 400 });
+        }
+
+        await db
+          .update(usersTable)
+          .set({
+            stripeSubscriptionId: null,
+            stripeCustomerId: null,
+            plan: null,
+          })
+          .where(eq(usersTable.id, userId));
+
+        break;
+      }
+
+      default:
+        console.log(`Unhandled event type: ${event.type}`);
+    }
+
+    return NextResponse.json({ received: true });
+  } catch (err) {
+    console.error("Stripe webhook error:", (err as Error).message);
+    return new NextResponse("Webhook error", { status: 400 });
+  }
 };
