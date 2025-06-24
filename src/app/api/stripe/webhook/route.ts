@@ -1,95 +1,81 @@
 import { eq } from "drizzle-orm";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 
 import { db } from "@/db";
 import { usersTable } from "@/db/schema";
 
-export const POST = async (request: Request) => {
+export const runtime = "nodejs";
+export const preferredRegion = "home";
+
+export async function POST(req: NextRequest) {
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+    apiVersion: "2025-05-28.basil",
+  });
+
+  const sig = req.headers.get("stripe-signature") as string;
+  const rawBody = await req.arrayBuffer();
+
+  let event: Stripe.Event;
+
   try {
-    if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) {
-      throw new Error("Stripe keys not configured");
-    }
-
-    const signature = request.headers.get("stripe-signature");
-    if (!signature) {
-      throw new Error("Missing Stripe signature");
-    }
-
-    const text = await request.text();
-    const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-      apiVersion: "2025-05-28.basil",
-    });
-
-    const event = stripe.webhooks.constructEvent(
-      text,
-      signature,
-      process.env.STRIPE_WEBHOOK_SECRET,
+    event = stripe.webhooks.constructEvent(
+      Buffer.from(rawBody),
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET!,
     );
+  } catch (err: any) {
+    console.error("❌ Stripe webhook error:", err.message);
+    return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
+  }
 
-    switch (event.type) {
-      case "invoice.paid": {
-        const invoice = event.data.object as Stripe.Invoice;
+  if (event.type === "invoice.paid") {
+    const invoice = event.data.object as Stripe.Invoice;
 
-        const lineItem = invoice.lines.data?.[0];
-        const parent = lineItem?.parent as {
-          subscription_details?: {
-            subscription: string;
-            metadata?: {
-              userId?: string;
-            };
-          };
-        };
+    const customerId =
+      typeof invoice.customer === "string"
+        ? invoice.customer
+        : invoice.customer?.id;
 
-        const subscriptionId = parent?.subscription_details?.subscription;
-        const userId = parent?.subscription_details?.metadata?.userId;
-        const customerId = invoice.customer?.toString();
+    const rawSubscription = (invoice as any).subscription;
+    const subscriptionId =
+      typeof rawSubscription === "string"
+        ? rawSubscription
+        : (rawSubscription?.id ?? null);
 
-        if (!subscriptionId || !userId || !customerId) {
-          console.error("Missing subscription ID, user ID, or customer ID");
-          return new NextResponse("Missing data", { status: 400 });
-        }
+    const item = invoice.lines.data?.[0] as any;
+    const planId = item?.price?.id ?? null;
 
-        await db
-          .update(usersTable)
-          .set({
-            stripeSubscriptionId: subscriptionId,
-            stripeCustomerId: customerId,
-            plan: "essential",
-          })
-          .where(eq(usersTable.id, userId));
+    const userId =
+      invoice.metadata?.userId ?? invoice.lines.data?.[0]?.metadata?.userId;
 
-        break;
-      }
+    console.log("🔍 Webhook invoice.paid => userId:", userId);
 
-      case "customer.subscription.deleted": {
-        const subscription = event.data.object as Stripe.Subscription;
-        const userId = subscription.metadata?.userId;
-
-        if (!userId) {
-          console.error("Missing user ID on subscription deletion");
-          return new NextResponse("Missing user ID", { status: 400 });
-        }
-
-        await db
-          .update(usersTable)
-          .set({
-            stripeSubscriptionId: null,
-            stripeCustomerId: null,
-            plan: null,
-          })
-          .where(eq(usersTable.id, userId));
-
-        break;
-      }
-
-      default:
-        console.log(`Unhandled event type: ${event.type}`);
+    if (!userId || !customerId || !subscriptionId) {
+      console.warn("⚠️ Campos faltando para atualizar usuário:", {
+        userId,
+        customerId,
+        subscriptionId,
+      });
+      return NextResponse.json({ received: true });
     }
 
-    return NextResponse.json({ received: true });
-  } catch (err) {
-    console.error("Stripe webhook error:", (err as Error).message);
-    return new NextResponse("Webhook error", { status: 400 });
+    try {
+      await db
+        .update(usersTable)
+        .set({
+          stripeCustomerId: customerId,
+          stripeSubscriptionId: subscriptionId,
+          plan: planId,
+          updatedAt: new Date(),
+        })
+        .where(eq(usersTable.id, userId));
+
+      console.log("✅ Informações de assinatura salvas no banco.");
+    } catch (error) {
+      console.error("❌ Erro ao salvar assinatura no banco:", error);
+    }
   }
-};
+
+  return NextResponse.json({ received: true });
+}
