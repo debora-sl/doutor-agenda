@@ -9,14 +9,17 @@ export const POST = async (request: Request) => {
   if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) {
     throw new Error("Stripe secret key not found");
   }
+
   const signature = request.headers.get("stripe-signature");
   if (!signature) {
     throw new Error("Stripe signature not found");
   }
+
   const text = await request.text();
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
     apiVersion: "2025-05-28.basil",
   });
+
   const event = stripe.webhooks.constructEvent(
     text,
     signature,
@@ -25,52 +28,55 @@ export const POST = async (request: Request) => {
 
   switch (event.type) {
     case "invoice.paid": {
-      if (!event.data.object.id) {
-        throw new Error("Subscription ID not found");
-      }
-      const { customer } = event.data.object as unknown as {
-        customer: string;
+      const invoice = event.data.object as Stripe.Invoice & {
+        subscription?: string;
       };
-      const { subscription_details } = event.data.object.parent as unknown as {
-        subscription_details: {
-          subscription: string;
-          metadata: {
-            userId: string;
-          };
-        };
-      };
-      const subscription = subscription_details.subscription;
-      if (!subscription) {
-        throw new Error("Subscription not found");
+
+      if (!invoice.subscription || !invoice.customer) {
+        throw new Error("Missing subscription or customer in invoice");
       }
-      const userId = subscription_details.metadata.userId;
+
+      // Recupera os metadados da assinatura diretamente da API do Stripe
+      const subscription = await stripe.subscriptions.retrieve(
+        invoice.subscription,
+      );
+
+      const userId = subscription.metadata?.userId;
+
       if (!userId) {
-        throw new Error("User ID not found");
+        throw new Error("User ID not found in subscription metadata");
       }
+
       await db
         .update(usersTable)
         .set({
-          stripeSubscriptionId: subscription,
-          stripeCustomerId: customer,
+          stripeSubscriptionId: invoice.subscription,
+          stripeCustomerId: invoice.customer.toString(),
           plan: "essential",
         })
         .where(eq(usersTable.id, userId));
+
       break;
     }
+
     case "customer.subscription.deleted": {
       if (!event.data.object.id) {
         throw new Error("Subscription ID not found");
       }
+
       const subscription = await stripe.subscriptions.retrieve(
         event.data.object.id,
       );
+
       if (!subscription) {
         throw new Error("Subscription not found");
       }
-      const userId = subscription.metadata.userId;
+
+      const userId = subscription.metadata?.userId;
       if (!userId) {
         throw new Error("User ID not found");
       }
+
       await db
         .update(usersTable)
         .set({
@@ -79,8 +85,11 @@ export const POST = async (request: Request) => {
           plan: null,
         })
         .where(eq(usersTable.id, userId));
+
+      break;
     }
   }
+
   return NextResponse.json({
     received: true,
   });
