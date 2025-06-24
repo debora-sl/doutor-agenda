@@ -10,7 +10,7 @@ export const preferredRegion = "home";
 
 export async function POST(req: NextRequest) {
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-    apiVersion: "2025-05-28.basil",
+    apiVersion: "2025-05-28.basil", // versão estável e compatível
   });
 
   const sig = req.headers.get("stripe-signature") as string;
@@ -24,30 +24,38 @@ export async function POST(req: NextRequest) {
       sig,
       process.env.STRIPE_WEBHOOK_SECRET!,
     );
-  } catch (err: any) {
-    console.error("❌ Stripe webhook error:", err.message);
-    return new NextResponse(`Webhook Error: ${err.message}`, { status: 400 });
+  } catch (err) {
+    const error = err as Error;
+    console.error("❌ Stripe webhook error:", error.message);
+    return new NextResponse(`Webhook Error: ${error.message}`, { status: 400 });
   }
 
   if (event.type === "invoice.paid") {
     const invoice = event.data.object as Stripe.Invoice;
 
+    // Corrige a tipagem do customer
     const customerId =
       typeof invoice.customer === "string"
         ? invoice.customer
         : invoice.customer?.id;
 
-    const rawSubscription = (invoice as any).subscription;
+    // Acessa subscription mesmo não tipado oficialmente
+    const subscriptionRaw = (invoice as unknown as Record<string, unknown>)[
+      "subscription"
+    ];
     const subscriptionId =
-      typeof rawSubscription === "string"
-        ? rawSubscription
-        : (rawSubscription?.id ?? null);
+      typeof subscriptionRaw === "string"
+        ? subscriptionRaw
+        : (subscriptionRaw?.toString() ?? null);
 
-    const item = invoice.lines.data?.[0] as any;
+    // Acessa o plano (price.id) com tipagem segura
+    const item = invoice.lines.data?.[0] as Stripe.InvoiceLineItem & {
+      price?: { id: string };
+    };
     const planId = item?.price?.id ?? null;
 
-    const userId =
-      invoice.metadata?.userId ?? invoice.lines.data?.[0]?.metadata?.userId;
+    // Acessa userId a partir do metadata
+    const userId = invoice.metadata?.userId ?? item?.metadata?.userId;
 
     console.log("🔍 Webhook invoice.paid => userId:", userId);
 
