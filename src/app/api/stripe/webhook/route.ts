@@ -10,7 +10,7 @@ export const preferredRegion = "home";
 
 export async function POST(req: NextRequest) {
   const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-    apiVersion: "2025-05-28.basil", // versão estável e compatível
+    apiVersion: "2025-05-28.basil",
   });
 
   const sig = req.headers.get("stripe-signature") as string;
@@ -33,34 +33,39 @@ export async function POST(req: NextRequest) {
   if (event.type === "invoice.paid") {
     const invoice = event.data.object as Stripe.Invoice;
 
-    // Corrige a tipagem do customer
+    // Extrai customerId com segurança
     const customerId =
       typeof invoice.customer === "string"
         ? invoice.customer
-        : invoice.customer?.id;
+        : (invoice.customer?.id ?? null);
 
-    // Acessa subscription mesmo não tipado oficialmente
-    const subscriptionRaw = (invoice as unknown as Record<string, unknown>)[
-      "subscription"
-    ];
+    // Acessa subscription (não tipado oficialmente) com fallback seguro
     const subscriptionId =
-      typeof subscriptionRaw === "string"
-        ? subscriptionRaw
-        : (subscriptionRaw?.toString() ?? null);
+      typeof (invoice as any).subscription === "string"
+        ? (invoice as any).subscription
+        : ((invoice as any).subscription?.id ?? null);
 
-    // Acessa o plano (price.id) com tipagem segura
-    const item = invoice.lines.data?.[0] as Stripe.InvoiceLineItem & {
+    // Extrai line item e tipa metadados
+    const lineItem = invoice.lines.data?.[0] as Stripe.InvoiceLineItem & {
       price?: { id: string };
+      metadata?: { userId?: string };
     };
-    const planId = item?.price?.id ?? null;
 
-    // Acessa userId a partir do metadata
-    const userId = invoice.metadata?.userId ?? item?.metadata?.userId;
+    const planId = lineItem?.price?.id ?? null;
 
-    console.log("🔍 Webhook invoice.paid => userId:", userId);
+    // Tenta pegar o userId do invoice.metadata ou do line item
+    const userId =
+      invoice.metadata?.userId ?? lineItem?.metadata?.userId ?? null;
+
+    console.log("🔍 Webhook invoice.paid =>", {
+      userId,
+      customerId,
+      subscriptionId,
+      planId,
+    });
 
     if (!userId || !customerId || !subscriptionId) {
-      console.warn("⚠️ Campos faltando para atualizar usuário:", {
+      console.warn("⚠️ Campos faltando para salvar assinatura:", {
         userId,
         customerId,
         subscriptionId,
@@ -79,9 +84,9 @@ export async function POST(req: NextRequest) {
         })
         .where(eq(usersTable.id, userId));
 
-      console.log("✅ Informações de assinatura salvas no banco.");
+      console.log("✅ Informações de assinatura atualizadas no banco.");
     } catch (error) {
-      console.error("❌ Erro ao salvar assinatura no banco:", error);
+      console.error("❌ Erro ao atualizar dados no banco:", error);
     }
   }
 
