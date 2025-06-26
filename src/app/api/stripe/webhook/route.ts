@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   } catch (err) {
     const error = err as Error;
     console.error("❌ Stripe webhook error:", error.message);
-    return new NextResponse(`Webhook Error: ${error.message}`, { status: 400 });
+    return new NextResponse(`Webhook error: ${error.message}`, { status: 400 });
   }
 
   if (event.type === "invoice.paid") {
@@ -37,25 +37,25 @@ export async function POST(req: NextRequest) {
     const customerId =
       typeof invoice.customer === "string"
         ? invoice.customer
-        : (invoice.customer?.id ?? null);
+        : invoice.customer?.id;
 
-    // Acessa subscription (não tipado oficialmente) com fallback seguro
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const invoiceUnsafe = invoice as any;
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
     const subscriptionId =
-      typeof (invoice as any).subscription === "string"
-        ? (invoice as any).subscription
-        : ((invoice as any).subscription?.id ?? null);
+      typeof invoiceUnsafe.subscription === "string"
+        ? invoiceUnsafe.subscription
+        : (invoiceUnsafe.subscription?.id ?? null);
 
-    // Extrai line item e tipa metadados
+    // Extrai line item e metadados
     const lineItem = invoice.lines.data?.[0] as Stripe.InvoiceLineItem & {
       price?: { id: string };
       metadata?: { userId?: string };
     };
 
     const planId = lineItem?.price?.id ?? null;
-
-    // Tenta pegar o userId do invoice.metadata ou do line item
-    const userId =
-      invoice.metadata?.userId ?? lineItem?.metadata?.userId ?? null;
+    const userId = invoice.metadata?.userId ?? lineItem?.metadata?.userId;
 
     console.log("🔍 Webhook invoice.paid =>", {
       userId,
@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
     });
 
     if (!userId || !customerId || !subscriptionId) {
-      console.warn("⚠️ Campos faltando para salvar assinatura:", {
+      console.warn("⚠️ Campos faltando para atualizar usuário:", {
         userId,
         customerId,
         subscriptionId,
@@ -84,9 +84,9 @@ export async function POST(req: NextRequest) {
         })
         .where(eq(usersTable.id, userId));
 
-      console.log("✅ Informações de assinatura atualizadas no banco.");
+      console.log("✅ Informações de assinatura salvas no banco.");
     } catch (error) {
-      console.error("❌ Erro ao atualizar dados no banco:", error);
+      console.error("❌ Erro ao salvar assinatura no banco:", error);
     }
   }
 
