@@ -1,94 +1,87 @@
 import { eq } from "drizzle-orm";
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import Stripe from "stripe";
 
 import { db } from "@/db";
 import { usersTable } from "@/db/schema";
 
-export const runtime = "nodejs";
-export const preferredRegion = "home";
-
-export async function POST(req: NextRequest) {
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+export const POST = async (request: Request) => {
+  if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) {
+    throw new Error("Stripe secret key not found");
+  }
+  const signature = request.headers.get("stripe-signature");
+  if (!signature) {
+    throw new Error("Stripe signature not found");
+  }
+  const text = await request.text();
+  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
     apiVersion: "2025-05-28.basil",
   });
+  const event = stripe.webhooks.constructEvent(
+    text,
+    signature,
+    process.env.STRIPE_WEBHOOK_SECRET,
+  );
 
-  const sig = req.headers.get("stripe-signature") as string;
-  const rawBody = await req.arrayBuffer();
-
-  let event: Stripe.Event;
-
-  try {
-    event = stripe.webhooks.constructEvent(
-      Buffer.from(rawBody),
-      sig,
-      process.env.STRIPE_WEBHOOK_SECRET!,
-    );
-  } catch (err) {
-    const error = err as Error;
-    console.error("❌ Stripe webhook error:", error.message);
-    return new NextResponse(`Webhook error: ${error.message}`, { status: 400 });
-  }
-
-  if (event.type === "invoice.paid") {
-    const invoice = event.data.object as Stripe.Invoice;
-
-    // Extrai customerId com segurança
-    const customerId =
-      typeof invoice.customer === "string"
-        ? invoice.customer
-        : invoice.customer?.id;
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const invoiceUnsafe = invoice as any;
-
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
-    const subscriptionId =
-      typeof invoiceUnsafe.subscription === "string"
-        ? invoiceUnsafe.subscription
-        : (invoiceUnsafe.subscription?.id ?? null);
-
-    // Extrai line item e metadados
-    const lineItem = invoice.lines.data?.[0] as Stripe.InvoiceLineItem & {
-      price?: { id: string };
-      metadata?: { userId?: string };
-    };
-
-    const planId = lineItem?.price?.id ?? null;
-    const userId = invoice.metadata?.userId ?? lineItem?.metadata?.userId;
-
-    console.log("🔍 Webhook invoice.paid =>", {
-      userId,
-      customerId,
-      subscriptionId,
-      planId,
-    });
-
-    if (!userId || !customerId || !subscriptionId) {
-      console.warn("⚠️ Campos faltando para atualizar usuário:", {
-        userId,
-        customerId,
-        subscriptionId,
-      });
-      return NextResponse.json({ received: true });
-    }
-
-    try {
+  switch (event.type) {
+    case "invoice.paid": {
+      if (!event.data.object.id) {
+        throw new Error("Subscription ID not found");
+      }
+      const { customer } = event.data.object as unknown as {
+        customer: string;
+      };
+      const { subscription_details } = event.data.object.parent as unknown as {
+        subscription_details: {
+          subscription: string;
+          metadata: {
+            userId: string;
+          };
+        };
+      };
+      const subscription = subscription_details.subscription;
+      if (!subscription) {
+        throw new Error("Subscription not found");
+      }
+      const userId = subscription_details.metadata.userId;
+      if (!userId) {
+        throw new Error("User ID not found");
+      }
       await db
         .update(usersTable)
         .set({
-          stripeCustomerId: customerId,
-          stripeSubscriptionId: subscriptionId,
-          plan: planId,
-          updatedAt: new Date(),
+          stripeSubscriptionId: subscription,
+          stripeCustomerId: customer,
+          plan: "essential",
         })
         .where(eq(usersTable.id, userId));
-
-      console.log("✅ Informações de assinatura salvas no banco.");
-    } catch (error) {
-      console.error("❌ Erro ao salvar assinatura no banco:", error);
+      break;
+    }
+    case "customer.subscription.deleted": {
+      if (!event.data.object.id) {
+        throw new Error("Subscription ID not found");
+      }
+      const subscription = await stripe.subscriptions.retrieve(
+        event.data.object.id,
+      );
+      if (!subscription) {
+        throw new Error("Subscription not found");
+      }
+      const userId = subscription.metadata.userId;
+      if (!userId) {
+        throw new Error("User ID not found");
+      }
+      await db
+        .update(usersTable)
+        .set({
+          stripeSubscriptionId: null,
+          stripeCustomerId: null,
+          plan: null,
+        })
+        .where(eq(usersTable.id, userId));
     }
   }
-
-  return NextResponse.json({ received: true });
-}
+  return NextResponse.json({
+    received: true,
+  });
+};

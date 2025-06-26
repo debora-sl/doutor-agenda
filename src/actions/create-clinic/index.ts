@@ -8,7 +8,6 @@ import { clinicsTable, usersToClinicsTable } from "@/db/schema";
 import { auth } from "@/lib/auth";
 
 export const createClinic = async (name: string) => {
-  // verifica se o usuário está logado
   const session = await auth.api.getSession({
     headers: await headers(),
   });
@@ -20,5 +19,5 @@ export const createClinic = async (name: string) => {
     userId: session.user.id,
     clinicId: clinic.id,
   });
-  redirect(`/dashboard`);
+  redirect("/dashboard");
 };
