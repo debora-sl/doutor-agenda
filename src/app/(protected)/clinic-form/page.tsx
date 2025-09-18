@@ -27,9 +27,9 @@ const ClinicFormPage = async () => {
       <Dialog open>
         <DialogContent className="sm:max-w-[425px]">
           <DialogHeader>
-            <DialogTitle>Adicionar clínica</DialogTitle>
+            <DialogTitle>Adicionar Clínica</DialogTitle>
             <DialogDescription>
-              Adicione uma clínica para continuar.
+              Adicione uma Clínica para continuar.
             </DialogDescription>
           </DialogHeader>
           <ClinicForm />
