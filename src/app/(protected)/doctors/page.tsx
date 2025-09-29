@@ -39,7 +39,10 @@ const DoctorsPage = async () => {
       <PageHeader>
         <PageHeaderContent>
           <PageTitle>Médicos</PageTitle>
-          <PageDescription>Gerencie os Médicos da sua clínica.</PageDescription>
+          <PageDescription>
+            Gerencie os Médicos da sua Clínica. (Verifique se o médico possui
+            uma assinatura ativa)
+          </PageDescription>
         </PageHeaderContent>
         <PageActions>
           <AddDoctorButton />
