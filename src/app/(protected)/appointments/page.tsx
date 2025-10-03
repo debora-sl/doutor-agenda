@@ -54,7 +54,7 @@ const AppointmentsPage = async () => {
         <PageHeaderContent>
           <PageTitle>Agendamentos</PageTitle>
           <PageDescription>
-            Gerencie os Agendamentos da sua Clínica
+            Gerencie os Agendamentos da sua Clínica!
           </PageDescription>
         </PageHeaderContent>
         <PageActions>
