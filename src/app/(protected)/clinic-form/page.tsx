@@ -29,7 +29,7 @@ const ClinicFormPage = async () => {
           <DialogHeader>
             <DialogTitle>Adicionar Clínica</DialogTitle>
             <DialogDescription>
-              Adicione uma Clínica para continuar navegando no site. Sem uma clínica não será possível continuar.
+              Adicione uma Clínica para continuar navegando no site.
             </DialogDescription>
           </DialogHeader>
           <ClinicForm />
