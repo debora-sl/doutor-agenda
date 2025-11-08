@@ -16,7 +16,6 @@ const AddDoctorButton = () => {
         <Button>
           <Plus />
           Adicionar Médico à sua Clinica. Ou contate o Administrador do Sistema
-          no e-mail: @.
         </Button>
       </DialogTrigger>
       <UpsertDoctorForm onSuccess={() => setIsOpen(false)} isOpen={isOpen} />
